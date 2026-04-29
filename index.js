@@ -62,6 +62,20 @@ app.get('/alain', (req, res) => {
 
             ws.onopen = () => {
                 document.getElementById('status').innerText = "Monsieur Alain vous ecoute...";
+                
+                // Envoyer un message initial pour declencher Alain
+                setTimeout(() => {
+                    ws.send(JSON.stringify({
+                        type: 'conversation.item.create',
+                        item: {
+                            type: 'message',
+                            role: 'user',
+                            content: [{ type: 'input_text', text: 'Bonjour' }]
+                        }
+                    }));
+                    ws.send(JSON.stringify({ type: 'response.create' }));
+                }, 1000);
+
                 source = audioCtx.createMediaStreamSource(stream);
                 processor = audioCtx.createScriptProcessor(4096, 1, 1);
                 source.connect(processor);
@@ -81,6 +95,7 @@ app.get('/alain', (req, res) => {
             ws.onmessage = async (e) => {
                 try {
                     const msg = JSON.parse(e.data);
+                    log('Type: ' + msg.type);
                     if (msg.type === 'response.audio.delta' && msg.delta) {
                         const binary = atob(msg.delta);
                         const bytes = new Uint8Array(binary.length);
@@ -99,7 +114,7 @@ app.get('/alain', (req, res) => {
                         log('Alain: ' + msg.delta);
                     }
                     if (msg.type === 'error') {
-                        log('Erreur: ' + JSON.stringify(msg));
+                        log('Erreur: ' + JSON.stringify(msg.error));
                     }
                 } catch(err) {
                     log('Parse err: ' + err.message);
