@@ -20,29 +20,82 @@ app.get('/alain', (req, res) => {
     res.send(`<!DOCTYPE html>
 <html>
 <head>
+    <title>Seance avec Monsieur Alain</title>
+    <style>
+        body { background: #1a1a2e; color: white; font-family: Arial; text-align: center; padding: 50px; }
+        h1 { color: #c8a882; }
+        button { background: #8B2020; color: white; border: none; padding: 20px 40px; font-size: 20px; border-radius: 10px; cursor: pointer; margin: 20px; }
+        #status { margin: 20px; font-size: 18px; color: #c8a882; }
+    </style>
+</head>
+<body>
+    <h1>Cabinet Psychologue</h1>
+    <h2>Seance avec Monsieur Alain</h2>
+    <div id="status">Cliquez pour commencer</div>
+    <button onclick="demarrer()">Parler a Monsieur Alain</button>
+    <button onclick="arreter()">Terminer la seance</button>
+    <script>
+        let ws, stream, mediaRecorder;
+        const serverWs = location.origin.replace('https', 'wss').replace('http', 'ws') + '/relay';
 
-Le mer. 29 avr. 2026, 10:49, Melanie <melaniecrabet@gmail.com> a écrit :
-init python:
-    import webbrowser
+        async function demarrer() {
+            document.getElementById('status').innerText = "Connexion...";
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            ws = new WebSocket(serverWs);
+            ws.onopen = () => {
+                document.getElementById('status').innerText = "Monsieur Alain vous ecoute...";
+                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder.ondataavailable = (e) => {
+                    if (ws.readyState === 1) ws.send(e.data);
+                };
+                mediaRecorder.start(100);
+            };
+            ws.onmessage = (e) => { console.log(e.data); };
+            ws.onerror = () => { document.getElementById('status').innerText = "Erreur"; };
+            ws.onclose = (e) => { document.getElementById('status').innerText = "Ferme: " + e.reason; };
+        }
 
-    def ouvrir_session_alain():
-        webbrowser.open("https://serveur-inworld.onrender.com/alain")
+        function arreter() {
+            if (mediaRecorder) mediaRecorder.stop();
+            if (ws) ws.close();
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            document.getElementById('status').innerText = "Seance terminee";
+        }
+    </script>
+</body>
+</html>`);
+});
 
-label start:
-    scene bg black
-    "Lundi matin. 8h30."
-    "Vous arrivez a votre cabinet."
-    "=== Vos rendez-vous du jour ==="
-    "9h00 - Monsieur Alain (seance 1)"
-    "Vous appelez Monsieur Alain."
-    jump patient_alain
+wss.on('connection', (clientWs) => {
+    const apiKey = process.env.INWORLD_API_KEY;
+    const inworldWs = new WebSocket(
+        'wss://api.inworld.ai/api/v1/realtime/session?key=voice-' + Date.now() + '&protocol=realtime',
+        { headers: { Authorization: 'Basic ' + apiKey } }
+    );
 
-label patient_alain:
-    "Monsieur Alain entre dans votre bureau."
-    $ ouvrir_session_alain()
-    "Une fenetre s'est ouverte. Parlez a Monsieur Alain."
-    jump fin_seance
+    inworldWs.on('open', () => {
+        inworldWs.send(JSON.stringify({
+            type: 'session.update',
+            session: {
+                instructions: 'Tu t appelles Alain. Tu es un patient qui consulte une psychologue. Parle uniquement en Francais.',
+                output_modalities: ['audio', 'text']
+            }
+        }));
+    });
 
-label fin_seance:
-    "Fin de seance."
-    return
+    clientWs.on('message', (data) => {
+        if (inworldWs.readyState === 1) inworldWs.send(data);
+    });
+
+    inworldWs.on('message', (data) => {
+        if (clientWs.readyState === 1) clientWs.send(data);
+    });
+
+    inworldWs.on('close', () => clientWs.close());
+    clientWs.on('close', () => inworldWs.close());
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log('Serveur demarre sur le port ' + PORT);
+});
