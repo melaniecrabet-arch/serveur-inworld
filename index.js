@@ -160,24 +160,42 @@ wss.on('connection', (clientWs) => {
 
     inworldWs.on('open', () => {
         inworldWs.send(JSON.stringify({
-            type: 'session.update',
-            session: {
-                instructions: 'Tu t appelles Alain. Tu es un patient qui consulte une psychologue. Parle uniquement en Francais. Tu es stresse et hesitant.',
-                output_modalities: ['audio', 'text'],
-                audio: {
-                    input: {
-                        format: 'pcm16',
-                        sample_rate: 24000,
-                        turn_detection: { type: 'semantic_vad' }
-                    },
-                    output: {
-                        format: 'pcm16',
-                        sample_rate: 24000
-                    }
-                }
-            }
-        }));
-    });
+          ```json
+{
+  "type": "session.update",
+  "session": {
+    "type": "realtime",
+    "model": "xai/grok-4-1-fast-non-reasoning-latest",
+    "instructions": "Tu t'appelles Alain. Tu es un patient qui consulte une psychologue. Tu dois impérativement parler uniquement en Français. Ton ton hésitant et tu es là car tu te sens très stressé par ton quotidien. Ne sors jamais de ton rôle de patient. IMPORTANT : Tu dois parler lentement. Marque des pauses entre tes phrases. Tu ne dois jamais répondre impulsivement. Si tu as le moindre doute que la psychologue n'a fini de parler, tu reste silencieux.",
+    "output_modalities": [
+      "audio",
+      "text"
+    ],
+    "audio": {
+      "input": {
+        "transcription": {
+          "model": "assemblyai/u3-rt-pro"
+        },
+        "turn_detection": {
+          "type": "semantic_vad",
+          "eagerness": "high",
+          "create_response": true,
+          "interrupt_response": true
+        }
+      },
+      "output": {
+        "model": "inworld-tts-1.5-max",
+        "voice": "Alain"
+      }
+    },
+    "providerData": {
+      "stt": {
+        "voice_profile": false
+      }
+    }
+  }
+}
+```
 
     clientWs.on('message', (data) => {
         if (inworldWs.readyState === 1) inworldWs.send(data.toString());
