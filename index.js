@@ -154,13 +154,12 @@ app.get('/alain', (req, res) => {
 wss.on('connection', (clientWs) => {
     const apiKey = process.env.INWORLD_API_KEY;
     const inworldWs = new WebSocket(
-        'wss://api.inworld.ai/api/v1/realtime/session?key=voice-' + Date.now() + '&protocol=realtime',
-        { headers: { Authorization: 'Basic ' + apiKey } }
+    'wss://api.inworld.ai/v1/realtime?protocol=realtime',
+    { headers: { Authorization: 'Basic ' + apiKey } }
     );
-
-  inworldWs.send(JSON.stringify({
-  type: "session.update",
-  session: {
+    inworldWs.send(JSON.stringify({
+    type: "session.update",
+    session: {
     type: "realtime",
     model: "xai/grok-4-1-fast-non-reasoning-latest",
     instructions: "Tu t'appelles Alain. Tu es un patient qui consulte une psychologue. Tu dois impérativement parler uniquement en Français. Ton ton hésitant et tu es là car tu te sens très stressé par ton quotidien. Ne sors jamais de ton rôle de patient. IMPORTANT : Tu dois parler lentement. Marque des pauses entre tes phrases. Tu ne dois jamais répondre impulsivement. Si tu as le moindre doute que la psychologue n'a fini de parler, tu reste silencieux.",
