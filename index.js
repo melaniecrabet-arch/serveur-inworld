@@ -17,188 +17,119 @@ app.get('/', (req, res) => {
 });
 
 app.get('/alain', (req, res) => {
-res.send(`<!DOCTYPE html>
+    res.send(`<!DOCTYPE html>
 <html>
 <head>
-<title>Seance avec Monsieur Alain</title>
-<style>
-body { background:#1a1a2e; color:white; font-family:Arial; text-align:center; padding:40px;}
-button { padding:15px 30px; font-size:18px; margin:10px;}
-#log { max-width:800px; margin:20px auto; text-align:left;}
-</style>
+    <title>Seance avec Monsieur Alain</title>
+    <style>
+        body { background: #1a1a2e; color: white; font-family: Arial; text-align: center; padding: 50px; }
+        h1 { color: #c8a882; }
+        button { background: #8B2020; color: white; border: none; padding: 20px 40px; font-size: 20px; border-radius: 10px; cursor: pointer; margin: 20px; }
+        #status { margin: 20px; font-size: 18px; color: #c8a882; }
+        #log { text-align: left; max-width: 800px; margin: 20px auto; font-size: 14px; color: #aaa; }
+    </style>
 </head>
 <body>
+    <h1>Cabinet Psychologue</h1>
+    <h2>Seance avec Monsieur Alain</h2>
+    <div id="status">Cliquez pour commencer</div>
+    <button onclick="demarrer()">Parler a Monsieur Alain</button>
+    <button onclick="arreter()">Terminer la seance</button>
+    <div id="log"></div>
+    <script>
+        let ws, stream, mediaRecorder, audioCtx;
+        const serverWs = location.origin.replace('https', 'wss').replace('http', 'ws') + '/relay';
 
-<h1>Cabinet Psychologue</h1>
-<button onclick="demarrer()">Parler</button>
-<button onclick="stop()">Stop</button>
+        function log(msg) {
+            document.getElementById('log').innerHTML += '<p>' + msg + '</p>';
+        }
 
-<div id="log"></div>
+        async function demarrer() {
+            document.getElementById('status').innerText = "Connexion...";
+            audioCtx = new AudioContext();
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            ws = new WebSocket(serverWs);
+            ws.onopen = () => {
+                document.getElementById('status').innerText = "Monsieur Alain vous ecoute...";
+                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder.ondataavailable = (e) => {
+                    if (ws.readyState === 1) ws.send(e.data);
+                };
+                mediaRecorder.start(100);
+            };
+            ws.onmessage = async (e) => {
+                try {
+                    if (typeof e.data === 'string') {
+                        const msg = JSON.parse(e.data);
+                        log('Type: ' + msg.type);
+                        if (msg.type === 'response.audio.delta' && msg.delta) {
+                            const binary = atob(msg.delta);
+                            const bytes = new Uint8Array(binary.length);
+                            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                            try {
+                                const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+                                const source = audioCtx.createBufferSource();
+                                source.buffer = audioBuffer;
+                                source.connect(audioCtx.destination);
+                                source.start();
+                            } catch(err) {
+                                log('Audio err: ' + err.message);
+                            }
+                        }
+                        if (msg.type === 'response.output_text.delta') {
+                            log('Alain dit: ' + msg.delta);
+                        }
+                    }
+                } catch(err) {
+                    log('Erreur: ' + err.message);
+                }
+            };
+            ws.onerror = () => { document.getElementById('status').innerText = "Erreur"; };
+            ws.onclose = (e) => { document.getElementById('status').innerText = "Ferme: " + e.code + ' ' + e.reason; };
+        }
 
-<script>
-let ws, audioCtx, stream, processor, source;
-let nextPlayTime = 0;
-
-function log(msg){
-document.getElementById("log").innerHTML += "<p>"+msg+"</p>";
-}
-
-function floatTo16BitPCM(float32Array){
-const buffer = new ArrayBuffer(float32Array.length * 2);
-const view = new DataView(buffer);
-for (let i=0;i<float32Array.length;i++){
-const s=Math.max(-1,Math.min(1,float32Array[i]));
-view.setInt16(i*2,s<0?s*0x8000:s*0x7FFF,true);
-}
-return buffer;
-}
-
-function playAudio(base64){
-const binary=atob(base64);
-const bytes=new Uint8Array(binary.length);
-for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
-
-const int16=new Int16Array(bytes.buffer);
-const float32=new Float32Array(int16.length);
-for(let i=0;i<int16.length;i++) float32[i]=int16[i]/32768;
-
-const buffer=audioCtx.createBuffer(1,float32.length,24000);
-buffer.copyToChannel(float32,0);
-
-const src=audioCtx.createBufferSource();
-src.buffer=buffer;
-src.connect(audioCtx.destination);
-
-const start=Math.max(audioCtx.currentTime,nextPlayTime);
-src.start(start);
-nextPlayTime=start+buffer.duration;
-}
-
-async function demarrer(){
-audioCtx=new AudioContext({sampleRate:24000});
-stream=await navigator.mediaDevices.getUserMedia({audio:true});
-
-ws=new WebSocket(location.origin.replace('https','wss').replace('http','ws')+'/relay');
-
-ws.onopen=()=>{
-log("Connecté");
-
-ws.send(JSON.stringify({
-type:"conversation.item.create",
-item:{
-type:"message",
-role:"user",
-content:[{type:"input_text",text:"Bonjour"}]
-}
-}));
-
-ws.send(JSON.stringify({type:"response.create"}));
-
-source=audioCtx.createMediaStreamSource(stream);
-processor=audioCtx.createScriptProcessor(4096,1,1);
-
-source.connect(processor);
-processor.connect(audioCtx.destination);
-
-processor.onaudioprocess=(e)=>{
-if(ws.readyState===1){
-const pcm=floatTo16BitPCM(e.inputBuffer.getChannelData(0));
-const b64=btoa(String.fromCharCode(...new Uint8Array(pcm)));
-
-ws.send(JSON.stringify({
-type:"input_audio_buffer.append",
-audio:b64
-}));
-}
-};
-};
-
-ws.onmessage=(e)=>{
-const msg=JSON.parse(e.data);
-
-if(msg.type==="response.output_audio.delta"){
-playAudio(msg.delta);
-}
-
-if(msg.type==="response.output_audio_transcript.delta"){
-log("Alain: "+msg.delta);
-}
-};
-
-ws.onclose=(e)=> log("Fermé "+e.code);
-}
-
-function stop(){
-if(ws) ws.close();
-if(stream) stream.getTracks().forEach(t=>t.stop());
-}
-</script>
-
+        function arreter() {
+            if (mediaRecorder) mediaRecorder.stop();
+            if (ws) ws.close();
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            document.getElementById('status').innerText = "Seance terminee";
+        }
+    </script>
 </body>
 </html>`);
 });
 
 wss.on('connection', (clientWs) => {
     const apiKey = process.env.INWORLD_API_KEY;
-
     const inworldWs = new WebSocket(
-        'wss://api.inworld.ai/v1/realtime?protocol=realtime',
+        'wss://api.inworld.ai/api/v1/realtime/session?key=voice-' + Date.now() + '&protocol=realtime',
         { headers: { Authorization: 'Basic ' + apiKey } }
     );
 
     inworldWs.on('open', () => {
-        console.log("✅ Connecté à Inworld");
-
-        // ✅ modèle corrigé (IMPORTANT)
         inworldWs.send(JSON.stringify({
-            type: "session.update",
+            type: 'session.update',
             session: {
-                type: "realtime",
-                model: "inworld-tts-1.5-max",
-                instructions: "Tu t'appelles Alain. Tu es un patient stressé. Tu parles lentement en français.",
-                output_modalities: ["audio", "text"],
-                audio: {
-                    input: {
-                        transcription: {
-                            model: "assemblyai/u3-rt-pro"
-                        }
-                    },
-                    output: {
-                        model: "inworld-tts-1.5-max"
-                    }
-                }
+                instructions: 'Tu t appelles Alain. Tu es un patient qui consulte une psychologue. Parle uniquement en Francais.',
+                output_modalities: ['audio', 'text']
             }
         }));
     });
 
-    inworldWs.on('message', (data) => {
-        if (clientWs.readyState === 1) {
-            clientWs.send(data.toString());
-        }
-    });
-
-    inworldWs.on('close', (code) => {
-        console.log("❌ Fermé Inworld:", code);
-        clientWs.close(code);
-    });
-
-    inworldWs.on('error', (err) => {
-        console.log("❌ Erreur Inworld:", err.message);
-        clientWs.close(1011);
-    });
-
     clientWs.on('message', (data) => {
-        if (inworldWs.readyState === 1) {
-            inworldWs.send(data.toString());
-        }
+        if (inworldWs.readyState === 1) inworldWs.send(data);
     });
 
-    clientWs.on('close', () => {
-        inworldWs.close();
+    inworldWs.on('message', (data) => {
+        if (clientWs.readyState === 1) clientWs.send(data.toString());
     });
+
+    inworldWs.on('close', (code, reason) => clientWs.close(code, reason));
+    inworldWs.on('error', (err) => clientWs.close(1011, err.message));
+    clientWs.on('close', () => inworldWs.close());
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log('Serveur démarré sur le port ' + PORT);
+    console.log('Serveur demarre sur le port ' + PORT);
 });
