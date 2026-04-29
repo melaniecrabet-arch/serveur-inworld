@@ -17,45 +17,123 @@ app.get('/', (req, res) => {
 });
 
 app.get('/alain', (req, res) => {
-    res.send(`<!DOCTYPE html>
+res.send(`<!DOCTYPE html>
 <html>
 <head>
-    <title>Seance avec Monsieur Alain</title>
+<title>Seance avec Monsieur Alain</title>
+<style>
+body { background:#1a1a2e; color:white; font-family:Arial; text-align:center; padding:40px;}
+button { padding:15px 30px; font-size:18px; margin:10px;}
+#log { max-width:800px; margin:20px auto; text-align:left;}
+</style>
 </head>
 <body>
-    <h1>Cabinet Psychologue</h1>
-    <button onclick="demarrer()">Parler</button>
+
+<h1>Cabinet Psychologue</h1>
+<button onclick="demarrer()">Parler</button>
+<button onclick="stop()">Stop</button>
+
+<div id="log"></div>
 
 <script>
-let ws;
+let ws, audioCtx, stream, processor, source;
+let nextPlayTime = 0;
 
-function demarrer() {
-    ws = new WebSocket(location.origin.replace('https','wss').replace('http','ws') + '/relay');
+function log(msg){
+document.getElementById("log").innerHTML += "<p>"+msg+"</p>";
+}
 
-    ws.onopen = () => {
-        console.log("connecté serveur");
+function floatTo16BitPCM(float32Array){
+const buffer = new ArrayBuffer(float32Array.length * 2);
+const view = new DataView(buffer);
+for (let i=0;i<float32Array.length;i++){
+const s=Math.max(-1,Math.min(1,float32Array[i]));
+view.setInt16(i*2,s<0?s*0x8000:s*0x7FFF,true);
+}
+return buffer;
+}
 
-        ws.send(JSON.stringify({
-            type: 'conversation.item.create',
-            item: {
-                type: 'message',
-                role: 'user',
-                content: [{ type: 'input_text', text: 'Bonjour' }]
-            }
-        }));
+function playAudio(base64){
+const binary=atob(base64);
+const bytes=new Uint8Array(binary.length);
+for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
 
-        ws.send(JSON.stringify({ type: 'response.create' }));
-    };
+const int16=new Int16Array(bytes.buffer);
+const float32=new Float32Array(int16.length);
+for(let i=0;i<int16.length;i++) float32[i]=int16[i]/32768;
 
-    ws.onmessage = (e) => {
-        console.log("msg:", e.data);
-    };
+const buffer=audioCtx.createBuffer(1,float32.length,24000);
+buffer.copyToChannel(float32,0);
 
-    ws.onclose = (e) => {
-        console.log("fermé:", e.code);
-    };
+const src=audioCtx.createBufferSource();
+src.buffer=buffer;
+src.connect(audioCtx.destination);
+
+const start=Math.max(audioCtx.currentTime,nextPlayTime);
+src.start(start);
+nextPlayTime=start+buffer.duration;
+}
+
+async function demarrer(){
+audioCtx=new AudioContext({sampleRate:24000});
+stream=await navigator.mediaDevices.getUserMedia({audio:true});
+
+ws=new WebSocket(location.origin.replace('https','wss').replace('http','ws')+'/relay');
+
+ws.onopen=()=>{
+log("Connecté");
+
+ws.send(JSON.stringify({
+type:"conversation.item.create",
+item:{
+type:"message",
+role:"user",
+content:[{type:"input_text",text:"Bonjour"}]
+}
+}));
+
+ws.send(JSON.stringify({type:"response.create"}));
+
+source=audioCtx.createMediaStreamSource(stream);
+processor=audioCtx.createScriptProcessor(4096,1,1);
+
+source.connect(processor);
+processor.connect(audioCtx.destination);
+
+processor.onaudioprocess=(e)=>{
+if(ws.readyState===1){
+const pcm=floatTo16BitPCM(e.inputBuffer.getChannelData(0));
+const b64=btoa(String.fromCharCode(...new Uint8Array(pcm)));
+
+ws.send(JSON.stringify({
+type:"input_audio_buffer.append",
+audio:b64
+}));
+}
+};
+};
+
+ws.onmessage=(e)=>{
+const msg=JSON.parse(e.data);
+
+if(msg.type==="response.output_audio.delta"){
+playAudio(msg.delta);
+}
+
+if(msg.type==="response.output_audio_transcript.delta"){
+log("Alain: "+msg.delta);
+}
+};
+
+ws.onclose=(e)=> log("Fermé "+e.code);
+}
+
+function stop(){
+if(ws) ws.close();
+if(stream) stream.getTracks().forEach(t=>t.stop());
 }
 </script>
+
 </body>
 </html>`);
 });
@@ -68,11 +146,9 @@ wss.on('connection', (clientWs) => {
         { headers: { Authorization: 'Basic ' + apiKey } }
     );
 
-    // ✅ connexion ouverte
     inworldWs.on('open', () => {
         console.log("✅ Connecté à Inworld");
 
-        // ✅ envoi config UNE FOIS connecté
         inworldWs.send(JSON.stringify({
             type: "session.update",
             session: {
@@ -81,6 +157,11 @@ wss.on('connection', (clientWs) => {
                 instructions: "Tu t'appelles Alain. Tu es un patient stressé. Tu parles lentement en français.",
                 output_modalities: ["audio", "text"],
                 audio: {
+                    input: {
+                        transcription: {
+                            model: "assemblyai/u3-rt-pro"
+                        }
+                    },
                     output: {
                         model: "inworld-tts-1.5-max"
                     }
@@ -95,7 +176,7 @@ wss.on('connection', (clientWs) => {
         }
     });
 
-    inworldWs.on('close', (code, reason) => {
+    inworldWs.on('close', (code) => {
         console.log("❌ Fermé:", code);
         clientWs.close(code);
     });
