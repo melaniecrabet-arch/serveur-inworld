@@ -149,11 +149,12 @@ wss.on('connection', (clientWs) => {
     inworldWs.on('open', () => {
         console.log("✅ Connecté à Inworld");
 
+        // ✅ modèle corrigé (IMPORTANT)
         inworldWs.send(JSON.stringify({
             type: "session.update",
             session: {
                 type: "realtime",
-                model: "xai/grok-4-1-fast-non-reasoning-latest",
+                model: "inworld-tts-1.5-max",
                 instructions: "Tu t'appelles Alain. Tu es un patient stressé. Tu parles lentement en français.",
                 output_modalities: ["audio", "text"],
                 audio: {
@@ -177,12 +178,12 @@ wss.on('connection', (clientWs) => {
     });
 
     inworldWs.on('close', (code) => {
-        console.log("❌ Fermé:", code);
+        console.log("❌ Fermé Inworld:", code);
         clientWs.close(code);
     });
 
     inworldWs.on('error', (err) => {
-        console.log("❌ Erreur:", err.message);
+        console.log("❌ Erreur Inworld:", err.message);
         clientWs.close(1011);
     });
 
