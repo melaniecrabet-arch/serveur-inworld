@@ -26,6 +26,7 @@ app.get('/alain', (req, res) => {
         h1 { color: #c8a882; }
         button { background: #8B2020; color: white; border: none; padding: 20px 40px; font-size: 20px; border-radius: 10px; cursor: pointer; margin: 20px; }
         #status { margin: 20px; font-size: 18px; color: #c8a882; }
+        #log { text-align: left; max-width: 800px; margin: 20px auto; font-size: 14px; color: #aaa; }
     </style>
 </head>
 <body>
@@ -34,9 +35,14 @@ app.get('/alain', (req, res) => {
     <div id="status">Cliquez pour commencer</div>
     <button onclick="demarrer()">Parler a Monsieur Alain</button>
     <button onclick="arreter()">Terminer la seance</button>
+    <div id="log"></div>
     <script>
         let ws, stream, mediaRecorder, audioCtx;
         const serverWs = location.origin.replace('https', 'wss').replace('http', 'ws') + '/relay';
+
+        function log(msg) {
+            document.getElementById('log').innerHTML += '<p>' + msg + '</p>';
+        }
 
         async function demarrer() {
             document.getElementById('status').innerText = "Connexion...";
@@ -52,23 +58,34 @@ app.get('/alain', (req, res) => {
                 mediaRecorder.start(100);
             };
             ws.onmessage = async (e) => {
-                if (e.data instanceof Blob) {
-                    const arrayBuffer = await e.data.arrayBuffer();
-                    try {
-                        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-                        const source = audioCtx.createBufferSource();
-                        source.buffer = audioBuffer;
-                        source.connect(audioCtx.destination);
-                        source.start();
-                    } catch(err) {
-                        console.log('Audio non decodable:', err);
+                try {
+                    if (typeof e.data === 'string') {
+                        const msg = JSON.parse(e.data);
+                        log('Type: ' + msg.type);
+                        if (msg.type === 'response.audio.delta' && msg.delta) {
+                            const binary = atob(msg.delta);
+                            const bytes = new Uint8Array(binary.length);
+                            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                            try {
+                                const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+                                const source = audioCtx.createBufferSource();
+                                source.buffer = audioBuffer;
+                                source.connect(audioCtx.destination);
+                                source.start();
+                            } catch(err) {
+                                log('Audio err: ' + err.message);
+                            }
+                        }
+                        if (msg.type === 'response.output_text.delta') {
+                            log('Alain dit: ' + msg.delta);
+                        }
                     }
-                } else {
-                    console.log('Message:', e.data);
+                } catch(err) {
+                    log('Erreur: ' + err.message);
                 }
             };
             ws.onerror = () => { document.getElementById('status').innerText = "Erreur"; };
-            ws.onclose = (e) => { document.getElementById('status').innerText = "Ferme: " + e.reason; };
+            ws.onclose = (e) => { document.getElementById('status').innerText = "Ferme: " + e.code + ' ' + e.reason; };
         }
 
         function arreter() {
@@ -104,10 +121,11 @@ wss.on('connection', (clientWs) => {
     });
 
     inworldWs.on('message', (data) => {
-        if (clientWs.readyState === 1) clientWs.send(data);
+        if (clientWs.readyState === 1) clientWs.send(data.toString());
     });
 
-    inworldWs.on('close', () => clientWs.close());
+    inworldWs.on('close', (code, reason) => clientWs.close(code, reason));
+    inworldWs.on('error', (err) => clientWs.close(1011, err.message));
     clientWs.on('close', () => inworldWs.close());
 });
 
