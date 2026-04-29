@@ -185,7 +185,6 @@ wss.on('connection', (clientWs) => {
       },
       "output": {
         "model": "inworld-tts-1.5-max",
-        "voice": "Alain"
       }
     },
     "providerData": {
