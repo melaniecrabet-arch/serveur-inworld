@@ -38,6 +38,9 @@ app.get('/alain', (req, res) => {
     <div id="log"></div>
     <script>
         let ws, stream, audioCtx, processor, source;
+        let audioQueue = [];
+        let isPlaying = false;
+        let nextPlayTime = 0;
         const serverWs = location.origin.replace('https', 'wss').replace('http', 'ws') + '/relay';
 
         function log(msg) {
@@ -54,16 +57,39 @@ app.get('/alain', (req, res) => {
             return buffer;
         }
 
+        function playAudioChunk(base64Audio) {
+            try {
+                const binary = atob(base64Audio);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                const int16 = new Int16Array(bytes.buffer);
+                const float32 = new Float32Array(int16.length);
+                for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+                
+                const audioBuffer = audioCtx.createBuffer(1, float32.length, 24000);
+                audioBuffer.copyToChannel(float32, 0);
+                const src = audioCtx.createBufferSource();
+                src.buffer = audioBuffer;
+                src.connect(audioCtx.destination);
+                
+                const startTime = Math.max(audioCtx.currentTime, nextPlayTime);
+                src.start(startTime);
+                nextPlayTime = startTime + audioBuffer.duration;
+            } catch(err) {
+                log('Audio err: ' + err.message);
+            }
+        }
+
         async function demarrer() {
             document.getElementById('status').innerText = "Connexion...";
             audioCtx = new AudioContext({ sampleRate: 24000 });
+            nextPlayTime = 0;
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             ws = new WebSocket(serverWs);
 
             ws.onopen = () => {
                 document.getElementById('status').innerText = "Monsieur Alain vous ecoute...";
                 
-                // Envoyer un message initial pour declencher Alain
                 setTimeout(() => {
                     ws.send(JSON.stringify({
                         type: 'conversation.item.create',
@@ -95,22 +121,10 @@ app.get('/alain', (req, res) => {
             ws.onmessage = async (e) => {
                 try {
                     const msg = JSON.parse(e.data);
-                    log('Type: ' + msg.type);
-                    if (msg.type === 'response.audio.delta' && msg.delta) {
-                        const binary = atob(msg.delta);
-                        const bytes = new Uint8Array(binary.length);
-                        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                        const int16 = new Int16Array(bytes.buffer);
-                        const float32 = new Float32Array(int16.length);
-                        for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
-                        const audioBuffer = audioCtx.createBuffer(1, float32.length, 24000);
-                        audioBuffer.copyToChannel(float32, 0);
-                        const src = audioCtx.createBufferSource();
-                        src.buffer = audioBuffer;
-                        src.connect(audioCtx.destination);
-                        src.start();
+                    if (msg.type === 'response.output_audio.delta' && msg.delta) {
+                        playAudioChunk(msg.delta);
                     }
-                    if (msg.type === 'response.output_text.delta') {
+                    if (msg.type === 'response.output_audio_transcript.delta') {
                         log('Alain: ' + msg.delta);
                     }
                     if (msg.type === 'error') {
