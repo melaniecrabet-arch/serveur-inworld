@@ -40,7 +40,8 @@ app.get('/alain', (req, res) => {
             document.getElementById('status').innerText = "Connexion en cours...";
             try {
                 stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                ws = new WebSocket(WS_URL, [], { headers: { Authorization: "Basic " + API_KEY }});
+                const WS_URL_AUTH = "wss://api.inworld.ai/api/v1/realtime/session?key=voice-" + Date.now() + "&protocol=realtime&authorization=Basic%20" + API_KEY;
+                ws = new WebSocket(WS_URL_AUTH);
                 ws.onopen = () => { document.getElementById('status').innerText = "Alain vous ecoute..."; };
                 ws.onmessage = (e) => { console.log(e.data); };
                 ws.onerror = (e) => { document.getElementById('status').innerText = "Erreur de connexion"; };
