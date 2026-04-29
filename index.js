@@ -35,11 +35,12 @@ app.get('/alain', (req, res) => {
     <button onclick="demarrer()">Parler a Monsieur Alain</button>
     <button onclick="arreter()">Terminer la seance</button>
     <script>
-        let ws, stream, mediaRecorder;
+        let ws, stream, mediaRecorder, audioCtx;
         const serverWs = location.origin.replace('https', 'wss').replace('http', 'ws') + '/relay';
 
         async function demarrer() {
             document.getElementById('status').innerText = "Connexion...";
+            audioCtx = new AudioContext();
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             ws = new WebSocket(serverWs);
             ws.onopen = () => {
@@ -50,7 +51,22 @@ app.get('/alain', (req, res) => {
                 };
                 mediaRecorder.start(100);
             };
-            ws.onmessage = (e) => { console.log(e.data); };
+            ws.onmessage = async (e) => {
+                if (e.data instanceof Blob) {
+                    const arrayBuffer = await e.data.arrayBuffer();
+                    try {
+                        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                        const source = audioCtx.createBufferSource();
+                        source.buffer = audioBuffer;
+                        source.connect(audioCtx.destination);
+                        source.start();
+                    } catch(err) {
+                        console.log('Audio non decodable:', err);
+                    }
+                } else {
+                    console.log('Message:', e.data);
+                }
+            };
             ws.onerror = () => { document.getElementById('status').innerText = "Erreur"; };
             ws.onclose = (e) => { document.getElementById('status').innerText = "Ferme: " + e.reason; };
         }
