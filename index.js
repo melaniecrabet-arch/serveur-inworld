@@ -4,7 +4,7 @@ const http = require('http');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ server, path: '/relay' });
 
 app.use(express.json());
 app.use((req, res, next) => {
@@ -38,8 +38,6 @@ app.get('/alain', (req, res) => {
     <div id="log"></div>
     <script>
         let ws, stream, audioCtx, processor, source;
-        let audioQueue = [];
-        let isPlaying = false;
         let nextPlayTime = 0;
         const serverWs = location.origin.replace('https', 'wss').replace('http', 'ws') + '/relay';
 
@@ -90,6 +88,7 @@ app.get('/alain', (req, res) => {
 
             ws.onopen = () => {
                 document.getElementById('status').innerText = "Monsieur Alain vous ecoute...";
+                log('Connecte au serveur');
                 
                 setTimeout(() => {
                     ws.send(JSON.stringify({
@@ -136,8 +135,14 @@ app.get('/alain', (req, res) => {
                 }
             };
 
-            ws.onerror = () => { document.getElementById('status').innerText = "Erreur connexion"; };
-            ws.onclose = (e) => { document.getElementById('status').innerText = "Ferme: " + e.code; };
+            ws.onerror = (e) => { 
+                log('Erreur WebSocket: ' + e.message);
+                document.getElementById('status').innerText = "Erreur connexion"; 
+            };
+            ws.onclose = (e) => { 
+                log('Ferme: ' + e.code + ' ' + e.reason);
+                document.getElementById('status').innerText = "Ferme: " + e.code; 
+            };
         }
 
         function arreter() {
@@ -153,6 +158,7 @@ app.get('/alain', (req, res) => {
 });
 
 wss.on('connection', (clientWs) => {
+    console.log('Client connecte');
     const apiKey = process.env.INWORLD_API_KEY;
     const inworldWs = new WebSocket(
         'wss://api.inworld.ai/api/v1/realtime/session?key=voice-' + Date.now() + '&protocol=realtime',
@@ -160,6 +166,7 @@ wss.on('connection', (clientWs) => {
     );
 
     inworldWs.on('open', () => {
+        console.log('Connecte a Inworld');
         inworldWs.send(JSON.stringify({
             type: 'session.update',
             session: {
@@ -180,6 +187,16 @@ wss.on('connection', (clientWs) => {
         }));
     });
 
+    inworldWs.on('error', (err) => {
+        console.log('Erreur Inworld: ' + err.message);
+        clientWs.close(1011, err.message);
+    });
+
+    inworldWs.on('close', (code, reason) => {
+        console.log('Inworld ferme: ' + code + ' ' + reason);
+        clientWs.close(code, reason);
+    });
+
     clientWs.on('message', (data) => {
         if (inworldWs.readyState === 1) inworldWs.send(data.toString());
     });
@@ -188,8 +205,6 @@ wss.on('connection', (clientWs) => {
         if (clientWs.readyState === 1) clientWs.send(data.toString());
     });
 
-    inworldWs.on('close', (code, reason) => clientWs.close(code, reason));
-    inworldWs.on('error', (err) => clientWs.close(1011, err.message));
     clientWs.on('close', () => inworldWs.close());
 });
 
